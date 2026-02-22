@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: student-helper-bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./temp:/app/temp
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
