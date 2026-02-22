@@ -1,46 +1,73 @@
 const { Telegraf, Markup } = require('telegraf');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const PDFDocument = require('pdfkit');
+const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const express = require('express');
 
 // 1. SOZLAMALAR
-const bot = new Telegraf('8083341635:AAHNFcam9UUO6RZXJQ4AyeKlKkDSuGA7DiM');
-const genAI = new GoogleGenerativeAI('AIzaSyBGhV5h-pJi9qCSv3m67EcCYC_C0WH1OOU');
+const BOT_TOKEN = '8083341635:AAHNFcam9UUO6RZXJQ4AyeKlKkDSuGA7DiM';
+const GEMINI_KEY = 'AIzaSyBGhV5h-pJi9qCSv3m67EcCYC_C0WH1OOU';
+
+const bot = new Telegraf(BOT_TOKEN);
+const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 const app = express();
 
-// Vaqtinchalik fayllar uchun papka yaratish
 const TEMP_DIR = path.join(__dirname, 'temp');
-if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
 
-// 2. PDF YARATISH FUNKSIYASI (Siz yuborgan kod asosida)
-async function generatePDF(content, title, service) {
-    return new Promise((resolve, reject) => {
-        const filename = `${service}_${Date.now()}.pdf`;
-        const filepath = path.join(TEMP_DIR, filename);
-        const doc = new PDFDocument({ size: 'A4', margin: 72 });
-        const stream = fs.createWriteStream(filepath);
-        doc.pipe(stream);
+// 2. MINI APP INTERFEYSI (HTML kodingizni shu yerga joyladim)
+const miniAppHTML = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Helper</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #f4f4f9; padding: 20px; text-align: center; }
+        .card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .btn { padding: 12px 20px; border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; width: 100%; margin-top: 10px; }
+        .btn-primary { background: #1a73e8; }
+        .btn-success { background: #34a853; }
+        .price-tag { font-size: 20px; color: #1a73e8; font-weight: bold; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h3>📝 Referat / Mustaqil ish</h3>
+        <p>Mavzuni kiriting va AI sizga tayyorlab beradi.</p>
+        <div class="price-tag" id="price">5,000 so'm</div>
+        <input type="text" id="topic" placeholder="Mavzuni yozing..." style="width: 90%; padding: 10px; border-radius: 5px; border: 1px solid #ddd;">
+        <button class="btn btn-primary" onclick="order()">Buyurtma berish</button>
+    </div>
+    <script>
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+        function order() {
+            let topic = document.getElementById('topic').value;
+            if(!topic) return alert('Mavzuni yozing!');
+            tg.sendData(JSON.stringify({type: 'referat', topic: topic}));
+            tg.close();
+        }
+    </script>
+</body>
+</html>
+`;
 
-        // Dizayn (Header)
-        doc.rect(0, 0, doc.page.width, 80).fill('#1a73e8');
-        doc.fillColor('white').fontSize(20).text('Student Helper Bot', 40, 25, { align: 'center' });
-        
-        doc.moveDown(4);
-        doc.fillColor('#1a73e8').fontSize(16).text(title, { align: 'center', underline: true });
-        doc.moveDown(2);
-        
-        // Asosiy matn
-        doc.fillColor('#222').fontSize(11).text(content, { align: 'justify', lineGap: 3 });
-        
-        doc.end();
-        stream.on('finish', () => resolve(filepath));
-        stream.on('error', reject);
-    });
+// 3. PDF YARATISH FUNKSIYASI
+async function createPDF(text, title) {
+    const filePath = path.join(TEMP_DIR, `doc_${Date.now()}.pdf`);
+    const doc = new PDFDocument();
+    doc.pipe(fs.createWriteStream(filePath));
+    doc.fontSize(20).text(title, { align: 'center' }).moveDown();
+    doc.fontSize(12).text(text, { align: 'justify' });
+    doc.end();
+    return filePath;
 }
 
-// 3. BOT MANTIQI
+// 4. BOT MANTIQI
 bot.start((ctx) => {
     ctx.replyWithHTML(`🎓 <b>Student Helper Botga xush kelibsiz!</b>\nID: <code>${ctx.from.id}</code>`, 
     Markup.inlineKeyboard([
@@ -48,30 +75,27 @@ bot.start((ctx) => {
     ]));
 });
 
-// AI orqali Referat yaratish namunasi
-bot.on('text', async (ctx) => {
-    const userTopic = ctx.message.text;
-    const waitMsg = await ctx.reply("⏳ AI ma'lumot qidirmoqda va PDF tayyorlamoqda...");
+// Mini Appdan ma'lumot kelganda
+bot.on('web_app_data', async (ctx) => {
+    const data = JSON.parse(ctx.webAppData.data());
+    await ctx.reply(`⏳ "${data.topic}" mavzusida referat tayyorlanmoqda...`);
 
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-        const result = await model.generateContent(`${userTopic} haqida batafsil ma'lumot ber.`);
+        const result = await model.generateContent(data.topic + " haqida o'zbek tilida referat yoz.");
         const text = result.response.text();
 
-        const pdfPath = await generatePDF(text, userTopic, 'referat');
-        
-        await ctx.replyWithDocument({ source: pdfPath, filename: `${userTopic}.pdf` });
-        
-        // Faylni o'chirish (tozalash)
-        fs.unlinkSync(pdfPath);
-    } catch (error) {
-        ctx.reply("❌ Xatolik yuz berdi: " + error.message);
+        const pdfFile = await createPDF(text, data.topic);
+        await ctx.replyWithDocument({ source: pdfFile, filename: `${data.topic}.pdf` });
+        fs.unlinkSync(pdfFile);
+    } catch (e) {
+        ctx.reply("Xatolik: " + e.message);
     }
 });
 
-// 4. RENDER UCHUN SERVER
-app.get('/', (req, res) => res.send('Bot is running...'));
+// 5. SERVERNI ISHGA TUSHIRISH
+app.get('/', (req, res) => res.send(miniAppHTML)); // Bu yerda endi interfeys ochiladi
 app.listen(process.env.PORT || 3000, () => {
-    console.log("Server ishga tushdi");
+    console.log("Server Live!");
     bot.launch();
 });
