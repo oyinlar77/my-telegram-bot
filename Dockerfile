@@ -1,6 +1,6 @@
-BOT_TOKEN=8083341635:AAHNFcam9UUO6RZXJQ4AyeKlKkDSuGA7DiM
-GEMINI_API_KEY=AIzaSyBGhV5h-pJi9qCSv3m67EcCYC_C0WH1OOU
-PORT=3000
-WEB_APP_URL=https://your-domain.com
-ADMIN_IDS=123456789,987654321
-KEEP_ALIVE_URL=https://your-domain.com
+FROM node:18
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+CMD ["node", "index.js"]
